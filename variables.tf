@@ -13,7 +13,7 @@ variable "location" {
 variable "vm_count" {
   type        = number
   description = "The number of virtual machines to create."
-  default     = 4
+  default     = 2
 }
 
 variable "vm_name_prefix" {
