@@ -1,0 +1,89 @@
+name: 'Terraform Deploy to Azure'
+
+on:
+  push:
+    branches:
+      - main # Triggers on pushes to the main branch
+  pull_request:
+    branches:
+      - main # Triggers on pull requests targeting the main branch
+  workflow_dispatch: # Allows manual triggering from the Actions tab
+
+env:
+  # TF_VAR_ (Terraform variables) can be set here if they are not sensitive
+  # and you don't want to manage them through GitHub secrets or tfvars files.
+  # For example:
+  # TF_VAR_vm_name: "my-prod-vm"
+
+  # Secrets will be used for sensitive values like Azure credentials and SSH keys.
+  # We pass the SSH public key as a TF_VAR so Terraform can use it.
+  TF_VAR_admin_ssh_public_key: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
+
+permissions: # Needed for OIDC authentication with Azure
+  id-token: write   # Required for azure/login to fetch an OIDC token
+  contents: read    # Required for actions/checkout to read repository content
+
+jobs:
+  terraform_deploy:
+    name: 'Terraform Deploy Infrastructure'
+    runs-on: ubuntu-latest
+    # Optional: Define a GitHub environment for protection rules or environment-specific secrets
+    # environment: production
+
+    steps:
+      # Step 1: Checkout the repository code
+      - name: 'Checkout Repository Code'
+        uses: actions/checkout@v4
+
+      # Step 2: Log in to Azure using OpenID Connect (OIDC)
+      # This step uses secrets stored in GitHub to authenticate with Azure.
+      # It makes an Azure access token available to subsequent steps.
+      - name: 'Azure Login using OIDC'
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          # enable-AzPSSession: false # Set to true if you need Azure PowerShell session
+
+      # Step 3: Setup Terraform CLI
+      # This action installs a specific version of Terraform CLI.
+      - name: 'Setup Terraform CLI'
+        uses: hashicorp/setup-terraform@v3
+        # with:
+        #   terraform_version: "latest" # Or specify a version like "1.7.0"
+
+      # Step 4: Initialize Terraform
+      # This command initializes the Terraform working directory,
+      # downloads provider plugins, and configures the backend.
+      # -input=false: Disables interactive prompts.
+      # -no-color: Produces plain output suitable for logs.
+      # The backend.tf configuration should handle OIDC authentication automatically.
+      - name: 'Terraform Init'
+        id: init
+        run: terraform init -input=false -no-color
+
+      # Step 5: Validate Terraform configuration
+      # Checks if the configuration is syntactically valid and internally consistent.
+      - name: 'Terraform Validate'
+        id: validate
+        run: terraform validate -no-color
+
+      # Step 6: Generate Terraform Plan
+      # Creates an execution plan.
+      # -out=tfplan: Saves the plan to a file, which is then used by terraform apply.
+      # This step runs for all triggers (push to main, PR to main, manual dispatch).
+      # For PRs, this plan is what you would review.
+      - name: 'Terraform Plan'
+        id: plan
+        run: terraform plan -input=false -no-color -out=tfplan
+        # continue-on-error: true # If you want PR checks to pass even if plan has changes/errors (not typical for 'plan' itself)
+
+      # Step 7: Apply Terraform Plan
+      # This step applies the changes defined in the plan.
+      # It ONLY runs on a push to the 'main' branch.
+      # -auto-approve: Applies the plan without interactive confirmation.
+      - name: 'Terraform Apply'
+        id: apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -input=false -auto-approve -no-color tfplan

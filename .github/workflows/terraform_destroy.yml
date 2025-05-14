@@ -1,0 +1,71 @@
+name: 'Terraform Destroy Azure Infrastructure (Manual)'
+
+on:
+  workflow_dispatch: # Allows manual triggering from the Actions tab
+    inputs:
+      confirmation:
+        description: 'Type "destroy-azure-infra" to confirm you want to destroy all resources.'
+        required: true
+        default: 'do-not-destroy'
+
+env:
+  # Secrets will be used for sensitive values like Azure credentials and SSH keys.
+  # We pass the SSH public key as a TF_VAR so Terraform can use it,
+  # even though for destroy it might not be strictly necessary for all resources,
+  # it's good practice if any part of the plan/destroy process might reference it.
+  TF_VAR_admin_ssh_public_key: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
+
+permissions: # Needed for OIDC authentication with Azure
+  id-token: write   # Required for azure/login to fetch an OIDC token
+  contents: read    # Required for actions/checkout to read repository content
+
+jobs:
+  terraform_destroy:
+    name: 'Terraform Destroy Infrastructure'
+    runs-on: ubuntu-latest
+    # Optional: Define a GitHub environment for protection rules or environment-specific secrets
+    # environment: production # Use the same environment if your secrets are scoped there
+
+    # Only run the job if the confirmation input is correct
+    if: github.event.inputs.confirmation == 'destroy-azure-infra'
+
+    steps:
+      # Step 1: Checkout the repository code
+      - name: 'Checkout Repository Code'
+        uses: actions/checkout@v4
+
+      # Step 2: Log in to Azure using OpenID Connect (OIDC)
+      - name: 'Azure Login using OIDC'
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Step 3: Setup Terraform CLI
+      - name: 'Setup Terraform CLI'
+        uses: hashicorp/setup-terraform@v3
+        # with:
+        #   terraform_version: "latest" # Or specify a version
+
+      # Step 4: Initialize Terraform
+      # Configures the backend for state file access.
+      - name: 'Terraform Init'
+        id: init
+        run: terraform init -input=false -no-color
+
+      # Step 5: Terraform Plan (Destroy) - Optional but Recommended
+      # Shows what resources will be destroyed. Review this in the logs.
+      - name: 'Terraform Plan (Destroy)'
+        id: plan-destroy
+        run: terraform plan -destroy -input=false -no-color -out=tfdestroyplan
+
+      # Step 6: Terraform Destroy
+      # This step actually destroys the infrastructure.
+      # It uses the plan generated in the previous step for safety,
+      # or can run destroy directly if you prefer not to use a plan file for destroy.
+      - name: 'Terraform Destroy'
+        id: destroy
+        run: terraform apply -input=false -auto-approve -no-color tfdestroyplan
+        # Alternative if not using a plan file for destroy:
+        # run: terraform destroy -input=false -auto-approve -no-color
