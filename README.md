@@ -2,7 +2,7 @@
 
 ## Project goal
 
-The project goal is to build an automation that can deploy Server instance(s) on Azure, running Nginx and mySQL on it.
+The project goal is to build an automation that can deploy Server instances (VM count 3 by default) on Azure, running Nginx and mySQL on the VM instances.
 All by Terraform and GitHub Action as code. We also build a manual Destroy Workflow.
 
 *(Although the code works in a prod environment, the main goal of this project is DevOps automation learning in Azure environment.)*
@@ -13,6 +13,8 @@ All by Terraform and GitHub Action as code. We also build a manual Destroy Workf
 2. Get all the files from this repo and replace the related ID-s to yours in the code files, also don't forget to create your own Secrets on your GitHub repo.
 3. Once you push the code to your own GitHub repo, it should automatically deploy everything.
 4. You can destroy the deployment by running the destroy workflow manually in your GitHub repo Actions.
+
+*note: the count of VM instances can be now adjust in `variables.tf` > `vm_count` variable.*
 
 ## Azure preparation
 
@@ -107,7 +109,7 @@ Name: `github-main-branch-federation`  *(name as you wish)*
 
 **How to do it:** 
 Azure Portal > Subscriptions > *(your subscription)* > Settings (in left menu) > Resource providers >   
-Serch for `Microsoft.Compute` > Select and register
+Search for `Microsoft.Compute` > Select and register
 
 ## Terraform code files 
 
@@ -126,7 +128,7 @@ Before this workflow can successfully run, you need to create the following Secr
 `AZURE_CLIENT_ID`: The Application (Client) ID of the Azure AD App registration you created.   
 `AZURE_SUBSCRIPTION_ID`: Your Azure Subscription ID.   
 `AZURE_TENANT_ID`: Your Azure Directory (Tenant) ID.   
-`ADMIN_SSH_PUBLIC_KEY`: The actual content of your SSH public key (e.g., the string from your id_rsa.pub file).   
+`ADMIN_SSH_PUBLIC_KEY`: The actual content of your SSH public key.   
 
 ### GitHub Actions workflow codes
 

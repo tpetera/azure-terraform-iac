@@ -10,10 +10,16 @@ variable "location" {
   default     = "West Europe" # region
 }
 
-variable "vm_name" {
+variable "vm_count" {
+  type        = number
+  description = "The number of virtual machines to create."
+  default     = 3
+}
+
+variable "vm_name_prefix" {
   type        = string
-  description = "The name for the virtual machine."
-  default     = "tp-azure-vm" 
+  description = "A prefix for the virtual machine names. VMs will be named <prefix>-<index>."
+  default     = "tp-azure-vm" # VMs will be tp-azure-vm-0, tp-azure-vm-1, etc.
 }
 
 variable "vm_size" {
@@ -70,4 +76,10 @@ variable "subnet_address_prefix" {
   type        = list(string)
   description = "The address prefix for the Subnet."
   default     = ["10.0.1.0/24"]
+}
+
+variable "availability_set_name" {
+  type        = string
+  description = "Name for the Availability Set."
+  default     = "vm-availability-set"
 }

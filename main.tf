@@ -3,11 +3,24 @@ data "azurerm_resource_group" "rg" {
   name = var.resource_group_name
 }
 
+# Create an Availability Set for the VMs
+resource "azurerm_availability_set" "avset" {
+  name                         = var.availability_set_name
+  location                     = data.azurerm_resource_group.rg.location
+  resource_group_name          = data.azurerm_resource_group.rg.name
+  platform_fault_domain_count  = 2 # Number of fault domains, can be 2 or 3 for most regions
+  platform_update_domain_count = 5 # Number of update domains
+  tags = {
+    environment = "dev"
+    project     = "azure-iac-vm"
+  }
+}
+
 # Create a Virtual Network (VNet)
 resource "azurerm_virtual_network" "vnet" {
-  name                = "${var.vm_name}-vnet"
+  name                = "${var.vm_name_prefix}-vnet"
   address_space       = var.vnet_address_space
-  location            = data.azurerm_resource_group.rg.location # Use the RG's location
+  location            = data.azurerm_resource_group.rg.location
   resource_group_name = data.azurerm_resource_group.rg.name
   tags = {
     environment = "dev"
@@ -17,15 +30,15 @@ resource "azurerm_virtual_network" "vnet" {
 
 # Create a Subnet within the VNet
 resource "azurerm_subnet" "subnet" {
-  name                 = "${var.vm_name}-subnet"
+  name                 = "${var.vm_name_prefix}-subnet"
   resource_group_name  = data.azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = var.subnet_address_prefix
 }
 
-# Create a Network Security Group (NSG)
+# Create a Network Security Group (NSG) - This will be applied to each VM's NIC
 resource "azurerm_network_security_group" "nsg" {
-  name                = "${var.vm_name}-nsg"
+  name                = "${var.vm_name_prefix}-nsg"
   location            = data.azurerm_resource_group.rg.location
   resource_group_name = data.azurerm_resource_group.rg.name
 
@@ -36,7 +49,7 @@ resource "azurerm_network_security_group" "nsg" {
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
-    destination_port_range     = "22" # Standard SSH port
+    destination_port_range     = "22"
     source_address_prefix      = "Internet"
     destination_address_prefix = "*"
   }
@@ -48,7 +61,7 @@ resource "azurerm_network_security_group" "nsg" {
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
-    destination_port_range     = "80" # Standard HTTP port
+    destination_port_range     = "80"
     source_address_prefix      = "Internet"
     destination_address_prefix = "*"
   }
@@ -60,7 +73,7 @@ resource "azurerm_network_security_group" "nsg" {
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
-    destination_port_range     = "443" # Standard HTTPS port
+    destination_port_range     = "443"
     source_address_prefix      = "Internet"
     destination_address_prefix = "*"
   }
@@ -71,9 +84,11 @@ resource "azurerm_network_security_group" "nsg" {
   }
 }
 
-# Create a Public IP Address
+
+# Create Public IP Addresses (one for each VM)
 resource "azurerm_public_ip" "pip" {
-  name                = "${var.vm_name}-pip"
+  count               = var.vm_count
+  name                = "${var.vm_name_prefix}-pip-${count.index}"
   location            = data.azurerm_resource_group.rg.location
   resource_group_name = data.azurerm_resource_group.rg.name
   allocation_method   = "Static"
@@ -81,51 +96,57 @@ resource "azurerm_public_ip" "pip" {
   tags = {
     environment = "dev"
     project     = "azure-iac-vm"
+    instance    = count.index
   }
 }
 
-# Create a Network Interface (NIC)
+# Create Network Interfaces (one for each VM)
 resource "azurerm_network_interface" "nic" {
-  name                = "${var.vm_name}-nic"
+  count               = var.vm_count
+  name                = "${var.vm_name_prefix}-nic-${count.index}"
   location            = data.azurerm_resource_group.rg.location
   resource_group_name = data.azurerm_resource_group.rg.name
 
   ip_configuration {
-    name                          = "${var.vm_name}-ipconfig"
+    name                          = "${var.vm_name_prefix}-ipconfig-${count.index}"
     subnet_id                     = azurerm_subnet.subnet.id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = azurerm_public_ip.pip.id
+    public_ip_address_id          = azurerm_public_ip.pip[count.index].id # Associate this NIC with its dedicated Public IP
   }
 
   tags = {
     environment = "dev"
     project     = "azure-iac-vm"
+    instance    = count.index
   }
 }
 
-# Associate the Network Security Group with the Network Interface
+# Associate Network Security Group with each Network Interface
 resource "azurerm_network_interface_security_group_association" "nsg_association" {
-  network_interface_id      = azurerm_network_interface.nic.id
+  count                     = var.vm_count
+  network_interface_id      = azurerm_network_interface.nic[count.index].id
   network_security_group_id = azurerm_network_security_group.nsg.id
 }
 
-# Define the Linux Virtual Machine
+# Linux Virtual Machines
 resource "azurerm_linux_virtual_machine" "vm" {
-  name                  = var.vm_name
+  count                 = var.vm_count
+  name                  = "${var.vm_name_prefix}-${count.index}"
   resource_group_name   = data.azurerm_resource_group.rg.name
   location              = data.azurerm_resource_group.rg.location
   size                  = var.vm_size
   admin_username        = var.admin_username
-  network_interface_ids = [azurerm_network_interface.nic.id]
+  network_interface_ids = [azurerm_network_interface.nic[count.index].id]
+  availability_set_id   = azurerm_availability_set.avset.id # Associate with Availability Set
 
   admin_ssh_key {
     username   = var.admin_username
-    public_key = var.admin_ssh_public_key # This will be populated by a GitHub Secret
+    public_key = var.admin_ssh_public_key
   }
 
   os_disk {
     caching              = "ReadWrite"
-    storage_account_type = "StandardSSD_LRS" # Standard SSD for better OS disk performance
+    storage_account_type = "StandardSSD_LRS"
   }
 
   source_image_reference {
@@ -135,12 +156,11 @@ resource "azurerm_linux_virtual_machine" "vm" {
     version   = var.vm_image_version
   }
 
-  # Custom data to run our user_data.sh script for provisioning
-  # The filebase64 function reads the file and Base64 encodes it.
-  custom_data = filebase64("${path.module}/user_data.sh")
+  custom_data = filebase64("${path.module}/user_data.sh") # Same user_data for all VMs
 
   tags = {
     environment = "dev"
     project     = "azure-iac-vm"
+    instance    = count.index
   }
 }
