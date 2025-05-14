@@ -2,8 +2,7 @@
 
 ## Project goal
 
-The project goal is to build an automation that can deploy Server instances (VM count 3 by default) on Azure, running Nginx and mySQL on the VM instances.
-All by Terraform and GitHub Action as code. We also build a manual Destroy Workflow.
+The project goal is to build an automation that deploys Server instances (VM count 3 by default) on Azure, running Nginx and mySQL on the VM instances. Deploys a Load Balancer for the VM nodes, to distibute traffic and ensure HA infrastructure. All by Terraform and GitHub Action as code. (We also build a manual Destroy Workflow.)
 
 *(Although the code works in a prod environment, the main goal of this project is DevOps automation learning in Azure environment.)*
 
@@ -14,7 +13,7 @@ All by Terraform and GitHub Action as code. We also build a manual Destroy Workf
 3. Once you push the code to your own GitHub repo, it should automatically deploy everything.
 4. You can destroy the deployment by running the destroy workflow manually in your GitHub repo Actions.
 
-*note: the count of VM instances can be now adjust in `variables.tf` > `vm_count` variable.*
+*note: the count of VM instances can be now adjusted in `variables.tf` > `vm_count` variable.*
 
 ## Azure preparation
 
