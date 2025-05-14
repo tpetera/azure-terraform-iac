@@ -22,6 +22,7 @@ All by Terraform and GitHub Action as code. We also build a manual Destroy Workf
 - [ ] Create Azure Storage Account and Container for Terraform State
 - [ ] Create Azure AD Application Registration & Service Principal
 - [ ] Configure Federated Credential for OIDC
+- [ ] Register Resource providers
 
 
 ### Create an Azure Resource Group
@@ -98,7 +99,15 @@ organization: `<your GitHub username> `
 Repository: `<your GitHub repo>`   
 Entity Type: `Branch`   
 GitHub branch name:  `your GitHub branch name`   
-Name: `github-main-branch-federation`  *(name as you wish)*
+Name: `github-main-branch-federation`  *(name as you wish)*   
+
+### Register resource Providers
+
+#### Microsoft.Compute provider
+
+**How to do it:** 
+Azure Portal > Subscriptions > *(your subscription)* > Settings (in left menu) > Resource providers >   
+Serch for `Microsoft.Compute` > Select and register
 
 ## Terraform code files 
 
