@@ -1,8 +1,8 @@
-# Azure LoadBalanced VM cluster IaC with Terraform and GitHub Actions
+# Azure VM cluster IaC with Terraform and GitHub Actions
 
 ## Project goal
 
-The project goal is to build an automation that deploys LoadBalancer and HA VM cluster (3 nodes by defult) on Azure. Install Nginx and mySQL on all VMs via user_data script. All by Terraform and GitHub Action as code. (We also build a manual Destroy Workflow.)
+The project goal is to build an automation that deploys Application Gateway with WAF and LoadBalancer and VM cluster (3 nodes) on Azure. Install Nginx and mySQL on all VMs via user_data script. All by Terraform and GitHub Action as code. (We also build a manual Destroy Workflow.)
 
 *(Although the code works in a prod environment, the main goal of this project is DevOps automation learning in Azure environment.)*
 

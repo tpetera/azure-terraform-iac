@@ -8,11 +8,11 @@ resource "azurerm_availability_set" "avset" {
   name                         = var.availability_set_name
   location                     = data.azurerm_resource_group.rg.location
   resource_group_name          = data.azurerm_resource_group.rg.name
-  platform_fault_domain_count  = 2 # Number of fault domains
-  platform_update_domain_count = 5 # Number of update domains
+  platform_fault_domain_count  = 2
+  platform_update_domain_count = 5
   tags = {
     environment = "dev"
-    project     = "azure-iac-multi-vm-lb" # Updated project tag
+    project     = "azure-iac-appgw-waf" # Updated project tag
   }
 }
 
@@ -24,23 +24,30 @@ resource "azurerm_virtual_network" "vnet" {
   resource_group_name = data.azurerm_resource_group.rg.name
   tags = {
     environment = "dev"
-    project     = "azure-iac-multi-vm-lb"
+    project     = "azure-iac-appgw-waf"
   }
 }
 
-# Create a Subnet within the VNet
-resource "azurerm_subnet" "subnet" {
-  name                 = "${var.vm_name_prefix}-subnet"
+# Create a Subnet for the Virtual Machines
+resource "azurerm_subnet" "vm_subnet" {
+  name                 = "${var.vm_name_prefix}-snet" # VM Subnet
   resource_group_name  = data.azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
-  address_prefixes     = var.subnet_address_prefix
+  address_prefixes     = var.vm_subnet_address_prefix
 }
 
-# Create a Network Security Group (NSG)
-# This NSG will allow HTTP/HTTPS from anywhere (for the LB)
-# and SSH (which would typically be from a Bastion/Jumpbox or specific IPs in a production setup)
-resource "azurerm_network_security_group" "nsg" {
-  name                = "${var.vm_name_prefix}-nsg"
+# Create a dedicated Subnet for the Application Gateway
+resource "azurerm_subnet" "app_gateway_subnet" {
+  name                 = "AppGatewaySubnet" # Specific name often required or recommended
+  resource_group_name  = data.azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = [var.app_gateway_subnet_address_prefix]
+}
+
+# Create a Network Security Group (NSG) for the VM Subnet
+# This NSG will allow HTTP from the App Gateway Subnet and SSH
+resource "azurerm_network_security_group" "vm_nsg" {
+  name                = "${var.vm_name_prefix}-vm-nsg"
   location            = data.azurerm_resource_group.rg.location
   resource_group_name = data.azurerm_resource_group.rg.name
 
@@ -52,104 +59,149 @@ resource "azurerm_network_security_group" "nsg" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "22"
-    source_address_prefix      = "Internet" # For SSH via Bastion, Jumpbox, or if direct access is configured later
+    source_address_prefix      = "Internet" # For SSH via Bastion/Jumpbox. Restrict further in production.
     destination_address_prefix = "*"
   }
 
   security_rule {
-    name                       = "AllowHTTP" # For the Load Balancer Health Probe and traffic
+    name                       = "AllowHTTPFromAppGateway"
     priority                   = 200
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "80"
-    source_address_prefix      = "Internet" # Or "AzureLoadBalancer" for health probe if restricting further
+    source_address_prefix      = var.app_gateway_subnet_address_prefix # Allow from App Gateway Subnet
     destination_address_prefix = "*"
   }
-
-   security_rule {
-    name                       = "AllowHTTPS" # If you plan to use HTTPS later
-    priority                   = 300
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "443"
-    source_address_prefix      = "Internet"
-    destination_address_prefix = "*"
-  }
+  # No public HTTPS rule here as SSL terminates at App Gateway for now
 
   tags = {
     environment = "dev"
-    project     = "azure-iac-multi-vm-lb"
+    project     = "azure-iac-appgw-waf"
   }
 }
 
-# --- Azure Load Balancer Configuration ---
+# --- Azure Application Gateway & WAF Configuration ---
 
-# Public IP for the Load Balancer
-resource "azurerm_public_ip" "lb_pip" {
-  name                = "${var.vm_name_prefix}-lb-pip" # Single Public IP for the LB
+# Public IP for the Application Gateway
+resource "azurerm_public_ip" "app_gateway_pip" {
+  name                = var.app_gateway_public_ip_name
   location            = data.azurerm_resource_group.rg.location
   resource_group_name = data.azurerm_resource_group.rg.name
   allocation_method   = "Static"
-  sku                 = "Standard" # Standard SKU is required for Availability Sets/Zones with LB
+  sku                 = "Standard" # Required for WAF_v2 SKU of Application Gateway
   tags = {
     environment = "dev"
-    project     = "azure-iac-multi-vm-lb"
+    project     = "azure-iac-appgw-waf"
   }
 }
 
-# Azure Load Balancer resource
-resource "azurerm_lb" "lb" {
-  name                = "${var.vm_name_prefix}-lb"
-  location            = data.azurerm_resource_group.rg.location
+# WAF Policy
+resource "azurerm_web_application_firewall_policy" "waf_policy" {
+  name                = var.waf_policy_name
   resource_group_name = data.azurerm_resource_group.rg.name
-  sku                 = "Standard" # Must match the Public IP SKU
+  location            = data.azurerm_resource_group.rg.location
+
+  policy_settings {
+    enabled            = true
+    mode               = "Prevention" # Can be "Detection" or "Prevention"
+    file_upload_limit_in_mb = 100
+    request_body_check = true
+    max_request_body_size_in_kb = 128
+  }
+
+  managed_rules {
+    managed_rule_set {
+      type    = "OWASP"
+      version = "3.2" # Or "3.1", "3.0". Check Azure documentation for latest recommended.
+    }
+  }
+  tags = {
+    environment = "dev"
+    project     = "azure-iac-appgw-waf"
+  }
+}
+
+# Application Gateway
+resource "azurerm_application_gateway" "app_gateway" {
+  name                = var.app_gateway_name
+  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
+
+  sku {
+    name     = "WAF_v2" # SKU that includes WAF
+    tier     = "WAF_v2"
+    capacity = 2 # Default capacity units, adjust based on expected load
+  }
+
+  gateway_ip_configuration {
+    name      = "appGatewayIpConfig"
+    subnet_id = azurerm_subnet.app_gateway_subnet.id
+  }
+
+  frontend_port {
+    name = "httpPort"
+    port = 80
+  }
 
   frontend_ip_configuration {
-    name                 = "${var.vm_name_prefix}-lb-frontend-ipconfig"
-    public_ip_address_id = azurerm_public_ip.lb_pip.id
+    name                 = "appGatewayFrontendIp"
+    public_ip_address_id = azurerm_public_ip.app_gateway_pip.id
   }
+
+  backend_address_pool {
+    name = "appGatewayBackendPool"
+  }
+
+  backend_http_settings {
+    name                  = "httpBackendSettings"
+    cookie_based_affinity = "Disabled"
+    port                  = 80
+    protocol              = "Http"
+    request_timeout       = 20     # Seconds
+    probe_name            = "httpProbe" # Reference the probe defined below
+  }
+
+  http_listener {
+    name                           = "httpListener"
+    frontend_ip_configuration_name = "appGatewayFrontendIp"
+    frontend_port_name             = "httpPort"
+    protocol                       = "Http"
+    # If using a dedicated WAF policy resource, you can associate it here or at the gateway level.
+    # firewall_policy_id = azurerm_web_application_firewall_policy.waf_policy.id # Option 1: Associate at listener level
+  }
+
+  request_routing_rule {
+    name                       = "httpRoutingRule"
+    rule_type                  = "Basic"
+    http_listener_name         = "httpListener"
+    backend_address_pool_name  = "appGatewayBackendPool"
+    backend_http_settings_name = "httpBackendSettings"
+    priority                   = 100
+  }
+
+  probe {
+    name                = "httpProbe"
+    protocol            = "Http"
+    host                = "127.0.0.1"
+    path                = "/"
+    interval            = 30
+    timeout             = 30
+    unhealthy_threshold = 3
+  }
+
+  # Associate the dedicated WAF policy with the Application Gateway instance
+  firewall_policy_id = azurerm_web_application_firewall_policy.waf_policy.id
+  # NOTE: The inline 'waf_configuration' block has been removed from this resource
+  # as we are using the 'firewall_policy_id' to link the separate WAF policy resource.
 
   tags = {
     environment = "dev"
-    project     = "azure-iac-multi-vm-lb"
+    project     = "azure-iac-appgw-waf"
   }
 }
 
-# Backend Address Pool for the Load Balancer
-resource "azurerm_lb_backend_address_pool" "bap" {
-  loadbalancer_id = azurerm_lb.lb.id
-  name            = "${var.vm_name_prefix}-lb-backendpool"
-}
-
-# Health Probe for the Load Balancer (HTTP on port 80)
-resource "azurerm_lb_probe" "http_probe" {
-  loadbalancer_id     = azurerm_lb.lb.id
-  name                = "${var.vm_name_prefix}-http-probe"
-  port                = 80
-  protocol            = "Http"
-  request_path        = "/" # Nginx serves default page at root
-  interval_in_seconds = 5   # How often to probe
-  number_of_probes    = 2   # Number of consecutive probes to determine health status
-}
-
-# Load Balancing Rule (HTTP traffic on port 80)
-resource "azurerm_lb_rule" "http_rule" {
-  loadbalancer_id                = azurerm_lb.lb.id
-  name                           = "${var.vm_name_prefix}-http-lb-rule"
-  protocol                       = "Tcp"
-  frontend_port                  = 80
-  backend_port                   = 80 # Port on the backend VMs
-  frontend_ip_configuration_name = azurerm_lb.lb.frontend_ip_configuration[0].name
-  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.bap.id]
-  probe_id                       = azurerm_lb_probe.http_probe.id
-  enable_floating_ip             = false # Typically false for this scenario
-  idle_timeout_in_minutes        = 4
-  load_distribution              = "Default" # Default is 5-tuple hash
-}
 
 # --- Virtual Machine and related resources (using count) ---
 
@@ -162,31 +214,31 @@ resource "azurerm_network_interface" "nic" {
 
   ip_configuration {
     name                          = "${var.vm_name_prefix}-ipconfig-${count.index}"
-    subnet_id                     = azurerm_subnet.subnet.id
+    subnet_id                     = azurerm_subnet.vm_subnet.id # Ensure VMs are in the VM subnet
     private_ip_address_allocation = "Dynamic"
-    # No public_ip_address_id here; VMs are behind the Load Balancer
+    # Association with App Gateway backend pool is now done via a separate resource
   }
 
   tags = {
     environment = "dev"
-    project     = "azure-iac-multi-vm-lb"
+    project     = "azure-iac-appgw-waf"
     instance    = count.index
   }
 }
 
-# Associate NICs with the Load Balancer Backend Pool
-resource "azurerm_network_interface_backend_address_pool_association" "nic_lb_assoc" {
+# Associate each NIC's IP Configuration with the Application Gateway Backend Pool
+resource "azurerm_network_interface_application_gateway_backend_address_pool_association" "nic_appgw_assoc" {
   count                   = var.vm_count
   network_interface_id    = azurerm_network_interface.nic[count.index].id
-  ip_configuration_name   = azurerm_network_interface.nic[count.index].ip_configuration[0].name # Ensure this matches the name in nic's ip_configuration
-  backend_address_pool_id = azurerm_lb_backend_address_pool.bap.id
+  ip_configuration_name   = azurerm_network_interface.nic[count.index].ip_configuration[0].name
+  backend_address_pool_id = azurerm_application_gateway.app_gateway.backend_address_pool[0].id
 }
 
-# Associate Network Security Group with each Network Interface
-resource "azurerm_network_interface_security_group_association" "nsg_association" {
+# Associate Network Security Group with each VM's Network Interface
+resource "azurerm_network_interface_security_group_association" "vm_nsg_association" {
   count                     = var.vm_count
   network_interface_id      = azurerm_network_interface.nic[count.index].id
-  network_security_group_id = azurerm_network_security_group.nsg.id
+  network_security_group_id = azurerm_network_security_group.vm_nsg.id
 }
 
 # Linux Virtual Machines
@@ -198,7 +250,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
   size                  = var.vm_size
   admin_username        = var.admin_username
   network_interface_ids = [azurerm_network_interface.nic[count.index].id]
-  availability_set_id   = azurerm_availability_set.avset.id # Associate with Availability Set
+  availability_set_id   = azurerm_availability_set.avset.id
 
   admin_ssh_key {
     username   = var.admin_username
@@ -217,11 +269,11 @@ resource "azurerm_linux_virtual_machine" "vm" {
     version   = var.vm_image_version
   }
 
-  custom_data = filebase64("${path.module}/user_data.sh") # Same user_data for all VMs
+  custom_data = filebase64("${path.module}/user_data.sh")
 
   tags = {
     environment = "dev"
-    project     = "azure-iac-multi-vm-lb" # Updated project tag
+    project     = "azure-iac-appgw-waf"
     instance    = count.index
   }
 }
