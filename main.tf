@@ -151,7 +151,7 @@ resource "azurerm_application_gateway" "app_gateway" {
   }
 
   backend_address_pool {
-    name = "appGatewayBackendPool"
+    name = "appGatewayBackendPool" # This is the name we will reference
   }
 
   backend_http_settings {
@@ -168,15 +168,13 @@ resource "azurerm_application_gateway" "app_gateway" {
     frontend_ip_configuration_name = "appGatewayFrontendIp"
     frontend_port_name             = "httpPort"
     protocol                       = "Http"
-    # If using a dedicated WAF policy resource, you can associate it here or at the gateway level.
-    # firewall_policy_id = azurerm_web_application_firewall_policy.waf_policy.id # Option 1: Associate at listener level
   }
 
   request_routing_rule {
     name                       = "httpRoutingRule"
     rule_type                  = "Basic"
     http_listener_name         = "httpListener"
-    backend_address_pool_name  = "appGatewayBackendPool"
+    backend_address_pool_name  = "appGatewayBackendPool" # References the name of the backend_address_pool block
     backend_http_settings_name = "httpBackendSettings"
     priority                   = 100
   }
@@ -191,10 +189,7 @@ resource "azurerm_application_gateway" "app_gateway" {
     unhealthy_threshold = 3
   }
 
-  # Associate the dedicated WAF policy with the Application Gateway instance
   firewall_policy_id = azurerm_web_application_firewall_policy.waf_policy.id
-  # NOTE: The inline 'waf_configuration' block has been removed from this resource
-  # as we are using the 'firewall_policy_id' to link the separate WAF policy resource.
 
   tags = {
     environment = "dev"
@@ -216,7 +211,6 @@ resource "azurerm_network_interface" "nic" {
     name                          = "${var.vm_name_prefix}-ipconfig-${count.index}"
     subnet_id                     = azurerm_subnet.vm_subnet.id # Ensure VMs are in the VM subnet
     private_ip_address_allocation = "Dynamic"
-    # Association with App Gateway backend pool is now done via a separate resource
   }
 
   tags = {
@@ -231,7 +225,9 @@ resource "azurerm_network_interface_application_gateway_backend_address_pool_ass
   count                   = var.vm_count
   network_interface_id    = azurerm_network_interface.nic[count.index].id
   ip_configuration_name   = azurerm_network_interface.nic[count.index].ip_configuration[0].name
-  backend_address_pool_id = azurerm_application_gateway.app_gateway.backend_address_pool[0].id
+  # Correctly reference the backend_address_pool by finding its ID from the set of pools in app_gateway
+  # This assumes the pool name "appGatewayBackendPool" is unique and defined as above.
+  backend_address_pool_id = [for pool in azurerm_application_gateway.app_gateway.backend_address_pool : pool.id if pool.name == "appGatewayBackendPool"][0]
 }
 
 # Associate Network Security Group with each VM's Network Interface

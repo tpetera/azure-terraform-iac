@@ -1,11 +1,11 @@
-output "load_balancer_public_ip" {
-  description = "The public IP address of the Azure Load Balancer."
-  value       = azurerm_public_ip.lb_pip.ip_address
+output "application_gateway_public_ip" {
+  description = "The public IP address of the Azure Application Gateway."
+  value       = azurerm_public_ip.app_gateway_pip.ip_address # Corrected: was lb_pip, now app_gateway_pip
 }
 
-output "load_balancer_public_ip_fqdn" {
-  description = "The FQDN of the Azure Load Balancer public IP (if available)."
-  value       = azurerm_public_ip.lb_pip.fqdn
+output "application_gateway_public_ip_fqdn" {
+  description = "The FQDN of the Azure Application Gateway public IP (if available)."
+  value       = azurerm_public_ip.app_gateway_pip.fqdn # Corrected: was lb_pip, now app_gateway_pip
 }
 
 output "vm_names" {
@@ -24,6 +24,16 @@ output "resource_group_name_used" {
 }
 
 output "ssh_command_hint" {
-  description = "Hint: VMs are behind a load balancer and do not have individual public IPs. To SSH into them, use Azure Bastion, a jump box within the VNet, or configure NAT rules on the Load Balancer (more advanced)."
+  description = "Hint: VMs are behind an Application Gateway and do not have individual public IPs. To SSH into them, use Azure Bastion, a jump box within the VNet, or configure NAT rules (more advanced)."
   value       = "Connect to VMs using their private IPs from within the VNet (e.g., via a Bastion host). Example: ssh ${var.admin_username}@<A_VM_PRIVATE_IP> -i YOUR_PRIVATE_KEY_PATH"
+}
+
+output "application_gateway_name" {
+  description = "The name of the Application Gateway."
+  value       = azurerm_application_gateway.app_gateway.name
+}
+
+output "waf_policy_name_output" { # Added _output to avoid conflict with variable name if it existed
+  description = "The name of the WAF Policy."
+  value       = azurerm_web_application_firewall_policy.waf_policy.name
 }
